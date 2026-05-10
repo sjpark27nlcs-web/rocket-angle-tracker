@@ -1,0 +1,650 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Rocket Angle Tracker</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0f1115;
+      --card: #1a1d25;
+      --card2: #232735;
+      --text: #f2f4f8;
+      --muted: #aab2c0;
+      --accent: #6ee7b7;
+      --warn: #fbbf24;
+      --danger: #fb7185;
+      --border: #343a49;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 16px;
+      padding-bottom: 40px;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.35;
+    }
+
+    h1, h2, h3 { margin: 0 0 10px; }
+    h1 { font-size: 1.6rem; }
+    h2 { font-size: 1.15rem; color: var(--accent); }
+    p { color: var(--muted); margin: 8px 0; }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 14px;
+      margin: 12px 0;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.25);
+    }
+
+    .grid2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .grid3 {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 10px;
+    }
+
+    label {
+      display: block;
+      color: var(--muted);
+      font-size: 0.85rem;
+      margin: 8px 0 4px;
+    }
+
+    input, select, button, textarea {
+      width: 100%;
+      font: inherit;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      padding: 11px;
+      background: var(--card2);
+      color: var(--text);
+    }
+
+    button {
+      font-weight: 700;
+      cursor: pointer;
+      margin: 5px 0;
+      border: 0;
+      background: #2f3648;
+    }
+
+    button.primary { background: #047857; }
+    button.warning { background: #92400e; }
+    button.danger { background: #9f1239; }
+    button.blue { background: #1d4ed8; }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    .status {
+      padding: 10px;
+      border-radius: 10px;
+      background: var(--card2);
+      border: 1px solid var(--border);
+      font-weight: 700;
+    }
+
+    .ok { color: var(--accent); }
+    .warn { color: var(--warn); }
+    .bad { color: var(--danger); }
+    .muted { color: var(--muted); }
+
+    .big {
+      font-size: 1.35rem;
+      font-weight: 800;
+    }
+
+    .readout {
+      white-space: pre-wrap;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      background: #0b0d12;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+      overflow-x: auto;
+    }
+
+    .tiny { font-size: 0.82rem; color: var(--muted); }
+    .marker-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+    @media (max-width: 520px) {
+      .grid2, .grid3, .marker-row { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <h1>Rocket Angle Tracker</h1>
+  <p>
+    Logs phone orientation data for rocket triangulation. Use HTTPS and open directly in Safari/Chrome.
+    MATLAB should do the actual synchronization and 3D triangulation.
+  </p>
+
+  <div class="card">
+    <h2>1. Observer setup</h2>
+
+    <label for="observerId">Observer ID</label>
+    <input id="observerId" value="A" />
+
+    <div class="grid3">
+      <div>
+        <label for="xObs">x position from pad (m)</label>
+        <input id="xObs" type="number" step="0.01" value="300" />
+      </div>
+      <div>
+        <label for="yObs">y position from pad (m)</label>
+        <input id="yObs" type="number" step="0.01" value="0" />
+      </div>
+      <div>
+        <label for="zObs">phone height (m)</label>
+        <input id="zObs" type="number" step="0.01" value="1.50" />
+      </div>
+    </div>
+
+    <div class="grid2">
+      <div>
+        <label for="samplePeriodMs">sample period (ms)</label>
+        <input id="samplePeriodMs" type="number" step="1" value="20" />
+      </div>
+      <div>
+        <label for="phoneMode">phone pointing mode</label>
+        <select id="phoneMode">
+          <option value="portraitBack">Portrait, back of phone points at rocket</option>
+          <option value="landscapeBack">Landscape, back of phone points at rocket</option>
+          <option value="relativeOnly">Relative alpha/beta only</option>
+        </select>
+      </div>
+    </div>
+
+    <p class="tiny">
+      For first testing, use relative alpha/beta. For final triangulation, keep phone orientation consistent and calibrate while pointing at the launch pad.
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>2. Controls</h2>
+    <button class="primary" id="enableBtn">Enable Sensors</button>
+    <button class="blue" id="calibrateBtn" disabled>Calibrate: point at launch pad</button>
+    <button class="primary" id="startBtn" disabled>Start Logging</button>
+
+    <div class="marker-row">
+      <button class="warning" id="markLaunchBtn" disabled>Mark Launch</button>
+      <button class="warning" id="markApogeeBtn" disabled>Mark Apogee / Parachute</button>
+    </div>
+
+    <button class="danger" id="stopBtn" disabled>Stop Logging</button>
+    <button id="downloadBtn" disabled>Download CSV</button>
+    <button id="clearBtn">Clear Data</button>
+  </div>
+
+  <div class="card">
+    <h2>3. Status</h2>
+    <div id="statusBox" class="status warn">Not started.</div>
+    <p>Samples logged: <span class="big" id="sampleCount">0</span></p>
+    <p>Markers: <span id="markerList" class="muted">none</span></p>
+  </div>
+
+  <div class="card">
+    <h2>4. Live orientation</h2>
+    <div id="readout" class="readout">No sensor data yet.</div>
+  </div>
+
+  <div class="card">
+    <h2>5. Instructions</h2>
+    <p>Field use:</p>
+    <ol class="muted">
+      <li>Open this page directly in Safari/Chrome over HTTPS.</li>
+      <li>Enter observer position relative to the launch pad.</li>
+      <li>Tap Enable Sensors.</li>
+      <li>Point phone/sight at launch pad and tap Calibrate.</li>
+      <li>Tap Start Logging before launch.</li>
+      <li>Track the rocket/parachute. Tap markers if possible.</li>
+      <li>Download CSV and import it into MATLAB.</li>
+    </ol>
+  </div>
+
+<script>
+(() => {
+  "use strict";
+
+  const state = {
+    latest: null,
+    calibration: null,
+    logging: false,
+    rows: [],
+    markers: [],
+    sampleCount: 0,
+    startPerfMs: null,
+    lastSamplePerfMs: -Infinity,
+    sensorEnabled: false,
+    orientationEventName: null,
+    screenAngle: 0
+  };
+
+  const el = id => document.getElementById(id);
+
+  const ids = {
+    observerId: el("observerId"),
+    xObs: el("xObs"),
+    yObs: el("yObs"),
+    zObs: el("zObs"),
+    samplePeriodMs: el("samplePeriodMs"),
+    phoneMode: el("phoneMode"),
+    enableBtn: el("enableBtn"),
+    calibrateBtn: el("calibrateBtn"),
+    startBtn: el("startBtn"),
+    markLaunchBtn: el("markLaunchBtn"),
+    markApogeeBtn: el("markApogeeBtn"),
+    stopBtn: el("stopBtn"),
+    downloadBtn: el("downloadBtn"),
+    clearBtn: el("clearBtn"),
+    statusBox: el("statusBox"),
+    sampleCount: el("sampleCount"),
+    markerList: el("markerList"),
+    readout: el("readout")
+  };
+
+  function setStatus(message, kind = "warn") {
+    ids.statusBox.textContent = message;
+    ids.statusBox.className = `status ${kind}`;
+  }
+
+  function finite(x) {
+    return Number.isFinite(x);
+  }
+
+  function fmt(x, digits = 6) {
+    return finite(x) ? Number(x).toFixed(digits) : "";
+  }
+
+  function wrap180(deg) {
+    if (!finite(deg)) return NaN;
+    return ((deg + 540) % 360) - 180;
+  }
+
+  function wrap360(deg) {
+    if (!finite(deg)) return NaN;
+    return ((deg % 360) + 360) % 360;
+  }
+
+  function getScreenAngle() {
+    if (screen.orientation && finite(screen.orientation.angle)) return screen.orientation.angle;
+    if (finite(window.orientation)) return window.orientation;
+    return 0;
+  }
+
+  function getObserverInfo() {
+    return {
+      observer_id: ids.observerId.value.trim() || "A",
+      x_obs_m: Number(ids.xObs.value),
+      y_obs_m: Number(ids.yObs.value),
+      z_obs_m: Number(ids.zObs.value),
+      phone_mode: ids.phoneMode.value
+    };
+  }
+
+  function currentElapsedTime() {
+    if (state.startPerfMs === null || !state.latest) return NaN;
+    return (state.latest.perf_ms - state.startPerfMs) / 1000;
+  }
+
+  async function enableSensors() {
+    try {
+      if (!window.isSecureContext) {
+        setStatus("ERROR: not a secure context. Host this page with HTTPS.", "bad");
+        return;
+      }
+
+      if (typeof DeviceOrientationEvent === "undefined") {
+        setStatus("ERROR: DeviceOrientationEvent not supported on this browser.", "bad");
+        return;
+      }
+
+      if (typeof DeviceOrientationEvent.requestPermission === "function") {
+        const response = await DeviceOrientationEvent.requestPermission();
+        if (response !== "granted") {
+          setStatus("Permission denied. Open directly in Safari/Chrome over HTTPS, or reset site permissions.", "bad");
+          return;
+        }
+      }
+
+      state.orientationEventName = "deviceorientation";
+      window.addEventListener("deviceorientation", onOrientation, true);
+
+      // Some browsers support deviceorientationabsolute. We listen too, but only if events arrive.
+      window.addEventListener("deviceorientationabsolute", onOrientationAbsolute, true);
+
+      state.sensorEnabled = true;
+      ids.calibrateBtn.disabled = false;
+      setStatus("Sensors enabled. Move/tilt the phone to check live readings.", "ok");
+    } catch (err) {
+      setStatus("Sensor permission error: " + err, "bad");
+    }
+  }
+
+  function onOrientationAbsolute(event) {
+    // If this fires, it may provide a more absolute alpha on some devices.
+    handleOrientation(event, "deviceorientationabsolute");
+  }
+
+  function onOrientation(event) {
+    handleOrientation(event, "deviceorientation");
+  }
+
+  function handleOrientation(event, sourceName) {
+    const nowPerf = performance.now();
+    state.screenAngle = getScreenAngle();
+
+    const webkitHeading = finite(event.webkitCompassHeading) ? event.webkitCompassHeading : NaN;
+    const webkitAccuracy = finite(event.webkitCompassAccuracy) ? event.webkitCompassAccuracy : NaN;
+
+    state.latest = {
+      unix_ms: Date.now(),
+      perf_ms: nowPerf,
+      source: sourceName,
+      alpha_deg: finite(event.alpha) ? event.alpha : NaN,
+      beta_deg: finite(event.beta) ? event.beta : NaN,
+      gamma_deg: finite(event.gamma) ? event.gamma : NaN,
+      absolute: event.absolute === true,
+      webkitCompassHeading_deg: webkitHeading,
+      webkitCompassAccuracy_deg: webkitAccuracy,
+      screenAngle_deg: state.screenAngle
+    };
+
+    updateReadout();
+
+    if (state.logging) {
+      const samplePeriod = Math.max(5, Number(ids.samplePeriodMs.value) || 20);
+      if (nowPerf - state.lastSamplePerfMs >= samplePeriod) {
+        addRow("");
+        state.lastSamplePerfMs = nowPerf;
+      }
+    }
+  }
+
+  function computeDeltas() {
+    const L = state.latest;
+    const C = state.calibration;
+    if (!L || !C) {
+      return {
+        alpha_delta_deg: NaN,
+        beta_delta_deg: NaN,
+        gamma_delta_deg: NaN,
+        compass_delta_deg: NaN
+      };
+    }
+
+    const compassNow = finite(L.webkitCompassHeading_deg) ? L.webkitCompassHeading_deg : L.alpha_deg;
+    const compass0 = finite(C.webkitCompassHeading_deg) ? C.webkitCompassHeading_deg : C.alpha_deg;
+
+    return {
+      alpha_delta_deg: wrap180(L.alpha_deg - C.alpha_deg),
+      beta_delta_deg: L.beta_deg - C.beta_deg,
+      gamma_delta_deg: L.gamma_deg - C.gamma_deg,
+      compass_delta_deg: wrap180(compassNow - compass0)
+    };
+  }
+
+  function calibrate() {
+    if (!state.latest) {
+      alert("No sensor data yet. Press Enable Sensors first.");
+      return;
+    }
+
+    state.calibration = {
+      unix_ms: state.latest.unix_ms,
+      perf_ms: state.latest.perf_ms,
+      alpha_deg: state.latest.alpha_deg,
+      beta_deg: state.latest.beta_deg,
+      gamma_deg: state.latest.gamma_deg,
+      absolute: state.latest.absolute,
+      webkitCompassHeading_deg: state.latest.webkitCompassHeading_deg,
+      webkitCompassAccuracy_deg: state.latest.webkitCompassAccuracy_deg,
+      screenAngle_deg: state.latest.screenAngle_deg,
+      source: state.latest.source
+    };
+
+    ids.startBtn.disabled = false;
+    setStatus("Calibrated. Now press Start Logging before launch.", "ok");
+    updateReadout();
+  }
+
+  function startLogging() {
+    if (!state.latest) {
+      alert("No sensor data yet. Press Enable Sensors first.");
+      return;
+    }
+    if (!state.calibration) {
+      alert("Calibrate first while pointing at the launch pad.");
+      return;
+    }
+
+    state.rows = [];
+    state.markers = [];
+    state.sampleCount = 0;
+    state.startPerfMs = performance.now();
+    state.lastSamplePerfMs = -Infinity;
+    state.logging = true;
+
+    const obs = getObserverInfo();
+    const metadata = {
+      file_type: "rocket_angle_tracker_csv",
+      version: "1.0",
+      created_unix_ms: Date.now(),
+      observer_id: obs.observer_id,
+      x_obs_m: obs.x_obs_m,
+      y_obs_m: obs.y_obs_m,
+      z_obs_m: obs.z_obs_m,
+      phone_mode: obs.phone_mode,
+      calibration_unix_ms: state.calibration.unix_ms,
+      calibration_alpha_deg: state.calibration.alpha_deg,
+      calibration_beta_deg: state.calibration.beta_deg,
+      calibration_gamma_deg: state.calibration.gamma_deg,
+      calibration_webkitCompassHeading_deg: state.calibration.webkitCompassHeading_deg,
+      calibration_webkitCompassAccuracy_deg: state.calibration.webkitCompassAccuracy_deg,
+      note: "Rows beginning with # are metadata. Data columns follow the header row."
+    };
+
+    Object.entries(metadata).forEach(([k, v]) => {
+      state.rows.push(`# ${k}: ${v}`);
+    });
+
+    state.rows.push([
+      "observer_id",
+      "x_obs_m",
+      "y_obs_m",
+      "z_obs_m",
+      "phone_mode",
+      "unix_ms",
+      "t_s",
+      "perf_ms",
+      "source",
+      "alpha_deg",
+      "beta_deg",
+      "gamma_deg",
+      "alpha_delta_deg",
+      "beta_delta_deg",
+      "gamma_delta_deg",
+      "compass_delta_deg",
+      "absolute",
+      "webkitCompassHeading_deg",
+      "webkitCompassAccuracy_deg",
+      "screenAngle_deg",
+      "marker"
+    ].join(","));
+
+    ids.markLaunchBtn.disabled = false;
+    ids.markApogeeBtn.disabled = false;
+    ids.stopBtn.disabled = false;
+    ids.downloadBtn.disabled = true;
+    ids.startBtn.disabled = true;
+    ids.calibrateBtn.disabled = true;
+
+    setStatus("Logging orientation data.", "ok");
+    updateCount();
+  }
+
+  function stopLogging() {
+    state.logging = false;
+    ids.markLaunchBtn.disabled = true;
+    ids.markApogeeBtn.disabled = true;
+    ids.stopBtn.disabled = true;
+    ids.downloadBtn.disabled = state.rows.length <= 1;
+    ids.startBtn.disabled = false;
+    ids.calibrateBtn.disabled = false;
+    setStatus("Stopped. Download CSV.", "warn");
+  }
+
+  function addMarker(name) {
+    if (!state.latest) {
+      alert("No sensor data yet.");
+      return;
+    }
+    addRow(name);
+    state.markers.push(`${name}@${fmt(currentElapsedTime(), 3)}s`);
+    ids.markerList.textContent = state.markers.join(", ");
+  }
+
+  function addRow(marker) {
+    if (!state.latest) return;
+
+    const obs = getObserverInfo();
+    const L = state.latest;
+    const D = computeDeltas();
+    const t_s = currentElapsedTime();
+
+    const row = [
+      csvEscape(obs.observer_id),
+      fmt(obs.x_obs_m, 3),
+      fmt(obs.y_obs_m, 3),
+      fmt(obs.z_obs_m, 3),
+      csvEscape(obs.phone_mode),
+      L.unix_ms,
+      fmt(t_s, 6),
+      fmt(L.perf_ms, 3),
+      csvEscape(L.source),
+      fmt(L.alpha_deg, 6),
+      fmt(L.beta_deg, 6),
+      fmt(L.gamma_deg, 6),
+      fmt(D.alpha_delta_deg, 6),
+      fmt(D.beta_delta_deg, 6),
+      fmt(D.gamma_delta_deg, 6),
+      fmt(D.compass_delta_deg, 6),
+      L.absolute ? "true" : "false",
+      fmt(L.webkitCompassHeading_deg, 6),
+      fmt(L.webkitCompassAccuracy_deg, 6),
+      fmt(L.screenAngle_deg, 3),
+      csvEscape(marker)
+    ].join(",");
+
+    state.rows.push(row);
+    state.sampleCount += 1;
+    updateCount();
+  }
+
+  function csvEscape(value) {
+    const s = String(value ?? "");
+    if (/[",\n\r]/.test(s)) {
+      return '"' + s.replace(/"/g, '""') + '"';
+    }
+    return s;
+  }
+
+  function updateCount() {
+    ids.sampleCount.textContent = String(state.sampleCount);
+    ids.downloadBtn.disabled = state.rows.length <= 2 || state.logging;
+  }
+
+  function downloadCSV() {
+    if (state.rows.length <= 2) {
+      alert("No logged data to download.");
+      return;
+    }
+
+    const csv = state.rows.join("\n") + "\n";
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+
+    const obs = (ids.observerId.value.trim() || "observer").replace(/[^a-zA-Z0-9_-]/g, "_");
+    const filename = `rocket_tracker_${obs}_${Date.now()}.csv`;
+
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function clearData() {
+    if (state.logging) {
+      alert("Stop logging before clearing data.");
+      return;
+    }
+    state.rows = [];
+    state.markers = [];
+    state.sampleCount = 0;
+    state.startPerfMs = null;
+    state.lastSamplePerfMs = -Infinity;
+    ids.markerList.textContent = "none";
+    ids.downloadBtn.disabled = true;
+    updateCount();
+    setStatus("Data cleared.", "warn");
+  }
+
+  function updateReadout() {
+    const L = state.latest;
+    if (!L) {
+      ids.readout.textContent = "No sensor data yet.";
+      return;
+    }
+
+    const D = computeDeltas();
+    const C = state.calibration;
+
+    ids.readout.textContent =
+      `unix_ms: ${L.unix_ms}\n` +
+      `source: ${L.source}\n` +
+      `secure_context: ${window.isSecureContext}\n\n` +
+      `alpha_deg: ${fmt(L.alpha_deg, 3)}\n` +
+      `beta_deg:  ${fmt(L.beta_deg, 3)}\n` +
+      `gamma_deg: ${fmt(L.gamma_deg, 3)}\n\n` +
+      `alpha_delta_deg:   ${fmt(D.alpha_delta_deg, 3)}\n` +
+      `beta_delta_deg:    ${fmt(D.beta_delta_deg, 3)}\n` +
+      `gamma_delta_deg:   ${fmt(D.gamma_delta_deg, 3)}\n` +
+      `compass_delta_deg: ${fmt(D.compass_delta_deg, 3)}\n\n` +
+      `absolute: ${L.absolute}\n` +
+      `webkitCompassHeading_deg: ${fmt(L.webkitCompassHeading_deg, 3)}\n` +
+      `webkitCompassAccuracy_deg: ${fmt(L.webkitCompassAccuracy_deg, 3)}\n` +
+      `screenAngle_deg: ${fmt(L.screenAngle_deg, 1)}\n\n` +
+      `calibrated: ${C ? "yes" : "no"}\n` +
+      `logging: ${state.logging ? "yes" : "no"}`;
+  }
+
+  ids.enableBtn.addEventListener("click", enableSensors);
+  ids.calibrateBtn.addEventListener("click", calibrate);
+  ids.startBtn.addEventListener("click", startLogging);
+  ids.markLaunchBtn.addEventListener("click", () => addMarker("launch"));
+  ids.markApogeeBtn.addEventListener("click", () => addMarker("apogee"));
+  ids.stopBtn.addEventListener("click", stopLogging);
+  ids.downloadBtn.addEventListener("click", downloadCSV);
+  ids.clearBtn.addEventListener("click", clearData);
+
+  if (!window.isSecureContext) {
+    setStatus("Warning: not HTTPS. Sensor permission will probably fail.", "bad");
+  }
+})();
+</script>
+</body>
+</html>
