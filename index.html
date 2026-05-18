@@ -63,7 +63,7 @@
       margin: 8px 0 4px;
     }
 
-    input, select, button, textarea {
+    input, select, button {
       width: 100%;
       font: inherit;
       border-radius: 10px;
@@ -123,11 +123,11 @@
     }
   </style>
 </head>
+
 <body>
   <h1>Rocket Angle Tracker</h1>
   <p>
-    Logs phone orientation data for rocket triangulation. Use HTTPS and open directly in Safari/Chrome.
-    MATLAB should do the actual synchronization and 3D triangulation.
+    Logs phone orientation data for rocket triangulation. This version computes a 3D line-of-sight vector instead of directly using raw alpha/beta as azimuth/elevation.
   </p>
 
   <div class="card">
@@ -157,17 +157,20 @@
         <input id="samplePeriodMs" type="number" step="1" value="20" />
       </div>
       <div>
-        <label for="phoneMode">phone pointing mode</label>
-        <select id="phoneMode">
-          <option value="portraitBack">Portrait, back of phone points at rocket</option>
-          <option value="landscapeBack">Landscape, back of phone points at rocket</option>
-          <option value="relativeOnly">Relative alpha/beta only</option>
+        <label for="barrelAxis">barrel / sight direction in phone coordinates</label>
+        <select id="barrelAxis">
+          <option value="plusY" selected>+Y: top of phone points along barrel</option>
+          <option value="minusY">-Y: bottom of phone points along barrel</option>
+          <option value="plusX">+X: right side of phone points along barrel</option>
+          <option value="minusX">-X: left side of phone points along barrel</option>
+          <option value="plusZ">+Z: screen-side points at target</option>
+          <option value="minusZ">-Z: back of phone points at target</option>
         </select>
       </div>
     </div>
 
     <p class="tiny">
-      For first testing, use relative alpha/beta. For final triangulation, keep phone orientation consistent and calibrate while pointing at the launch pad.
+      If your phone's long body is parallel to the tracker barrel and the top of the phone points toward the front sight, use +Y. If the bottom of the phone points toward the front sight, use -Y.
     </p>
   </div>
 
@@ -195,22 +198,24 @@
   </div>
 
   <div class="card">
-    <h2>4. Live orientation</h2>
+    <h2>4. Live line-of-sight</h2>
     <div id="readout" class="readout">No sensor data yet.</div>
   </div>
 
   <div class="card">
     <h2>5. Instructions</h2>
-    <p>Field use:</p>
     <ol class="muted">
       <li>Open this page directly in Safari/Chrome over HTTPS.</li>
-      <li>Enter observer position relative to the launch pad.</li>
+      <li>Select the correct barrel-axis mode.</li>
       <li>Tap Enable Sensors.</li>
-      <li>Point phone/sight at launch pad and tap Calibrate.</li>
+      <li>Point the sight at the launch pad and tap Calibrate.</li>
       <li>Tap Start Logging before launch.</li>
       <li>Track the rocket/parachute. Tap markers if possible.</li>
       <li>Download CSV and import it into MATLAB.</li>
     </ol>
+    <p class="tiny">
+      Use los_azimuth_deg / los_elevation_deg or los_az_delta_deg / los_el_delta_deg for MATLAB processing, not raw alpha/beta.
+    </p>
   </div>
 
 <script>
@@ -227,7 +232,6 @@
     startPerfMs: null,
     lastSamplePerfMs: -Infinity,
     sensorEnabled: false,
-    orientationEventName: null,
     screenAngle: 0
   };
 
@@ -239,7 +243,7 @@
     yObs: el("yObs"),
     zObs: el("zObs"),
     samplePeriodMs: el("samplePeriodMs"),
-    phoneMode: el("phoneMode"),
+    barrelAxis: el("barrelAxis"),
     enableBtn: el("enableBtn"),
     calibrateBtn: el("calibrateBtn"),
     startBtn: el("startBtn"),
@@ -267,6 +271,14 @@
     return finite(x) ? Number(x).toFixed(digits) : "";
   }
 
+  function deg2rad(deg) {
+    return deg * Math.PI / 180;
+  }
+
+  function rad2deg(rad) {
+    return rad * 180 / Math.PI;
+  }
+
   function wrap180(deg) {
     if (!finite(deg)) return NaN;
     return ((deg + 540) % 360) - 180;
@@ -275,6 +287,43 @@
   function wrap360(deg) {
     if (!finite(deg)) return NaN;
     return ((deg % 360) + 360) % 360;
+  }
+
+  function norm3(v) {
+    return Math.hypot(v[0], v[1], v[2]);
+  }
+
+  function normalize3(v) {
+    const n = norm3(v);
+    if (!finite(n) || n === 0) return [NaN, NaN, NaN];
+    return [v[0] / n, v[1] / n, v[2] / n];
+  }
+
+  function matVecMul3(M, v) {
+    return [
+      M[0][0] * v[0] + M[0][1] * v[1] + M[0][2] * v[2],
+      M[1][0] * v[0] + M[1][1] * v[1] + M[1][2] * v[2],
+      M[2][0] * v[0] + M[2][1] * v[1] + M[2][2] * v[2]
+    ];
+  }
+
+  function matMul3(A, B) {
+    const C = [[0,0,0],[0,0,0],[0,0,0]];
+    for (let i = 0; i < 3; i++) {
+      for (let j = 0; j < 3; j++) {
+        C[i][j] = A[i][0]*B[0][j] + A[i][1]*B[1][j] + A[i][2]*B[2][j];
+      }
+    }
+    return C;
+  }
+
+  function rotZ(rad) {
+    const c = Math.cos(rad), s = Math.sin(rad);
+    return [
+      [ c, -s, 0],
+      [ s,  c, 0],
+      [ 0,  0, 1]
+    ];
   }
 
   function getScreenAngle() {
@@ -289,7 +338,7 @@
       x_obs_m: Number(ids.xObs.value),
       y_obs_m: Number(ids.yObs.value),
       z_obs_m: Number(ids.zObs.value),
-      phone_mode: ids.phoneMode.value
+      barrel_axis: ids.barrelAxis.value
     };
   }
 
@@ -298,83 +347,122 @@
     return (state.latest.perf_ms - state.startPerfMs) / 1000;
   }
 
-  async function enableSensors() {
-    try {
-      if (!window.isSecureContext) {
-        setStatus("ERROR: not a secure context. Host this page with HTTPS.", "bad");
-        return;
-      }
-
-      if (typeof DeviceOrientationEvent === "undefined") {
-        setStatus("ERROR: DeviceOrientationEvent not supported on this browser.", "bad");
-        return;
-      }
-
-      if (typeof DeviceOrientationEvent.requestPermission === "function") {
-        const response = await DeviceOrientationEvent.requestPermission();
-        if (response !== "granted") {
-          setStatus("Permission denied. Open directly in Safari/Chrome over HTTPS, or reset site permissions.", "bad");
-          return;
-        }
-      }
-
-      state.orientationEventName = "deviceorientation";
-      window.addEventListener("deviceorientation", onOrientation, true);
-
-      // Some browsers support deviceorientationabsolute. We listen too, but only if events arrive.
-      window.addEventListener("deviceorientationabsolute", onOrientationAbsolute, true);
-
-      state.sensorEnabled = true;
-      ids.calibrateBtn.disabled = false;
-      setStatus("Sensors enabled. Move/tilt the phone to check live readings.", "ok");
-    } catch (err) {
-      setStatus("Sensor permission error: " + err, "bad");
+  function barrelVectorDevice(axisMode) {
+    switch (axisMode) {
+      case "plusX":  return [ 1,  0,  0];
+      case "minusX": return [-1,  0,  0];
+      case "plusY":  return [ 0,  1,  0];
+      case "minusY": return [ 0, -1,  0];
+      case "plusZ":  return [ 0,  0,  1];
+      case "minusZ": return [ 0,  0, -1];
+      default:       return [ 0,  1,  0];
     }
   }
 
-  function onOrientationAbsolute(event) {
-    // If this fires, it may provide a more absolute alpha on some devices.
-    handleOrientation(event, "deviceorientationabsolute");
+  /*
+    Build a rotation matrix from the browser's alpha/beta/gamma Euler angles.
+
+    Raw alpha/beta/gamma can jump because they are Euler angles. However, when
+    converted to a rotation matrix and then to a pointing vector, the line of sight
+    is much more stable under roll.
+
+    Coordinate convention used here for logged line-of-sight:
+      los_x = approximate east/right world axis from browser orientation frame
+      los_y = approximate north/forward world axis from browser orientation frame
+      los_z = up
+
+    For final MATLAB triangulation, relative angles from calibration are often
+    more reliable than trusting absolute compass heading.
+  */
+  function rotationMatrixFromDeviceOrientation(alphaDeg, betaDeg, gammaDeg, screenDeg) {
+    if (!finite(alphaDeg) || !finite(betaDeg) || !finite(gammaDeg)) {
+      return null;
+    }
+
+    const a = deg2rad(alphaDeg);
+    const b = deg2rad(betaDeg);
+    const g = deg2rad(gammaDeg);
+
+    const ca = Math.cos(a), sa = Math.sin(a);
+    const cb = Math.cos(b), sb = Math.sin(b);
+    const cg = Math.cos(g), sg = Math.sin(g);
+
+    /*
+      DeviceOrientation intrinsic Z-X'-Y'' style matrix.
+      This common form converts device-frame vectors into an earth/world-like frame.
+    */
+    let R = [
+      [ ca*cg - sa*sb*sg,  -cb*sa,  ca*sg + cg*sa*sb ],
+      [ cg*sa + ca*sb*sg,   ca*cb,  sa*sg - ca*cg*sb ],
+      [       -cb*sg,          sb,          cb*cg     ]
+    ];
+
+    /*
+      Screen rotation correction. This reduces changes caused by portrait/landscape
+      screen rotation. If this makes your test worse on your phone, set screenDeg to 0
+      in the line below.
+    */
+    const screenRad = deg2rad(screenDeg || 0);
+    const Rscreen = rotZ(-screenRad);
+    R = matMul3(R, Rscreen);
+
+    return R;
   }
 
-  function onOrientation(event) {
-    handleOrientation(event, "deviceorientation");
-  }
+  function computeLineOfSight(sample) {
+    const axisMode = ids.barrelAxis.value;
+    const vDevice = barrelVectorDevice(axisMode);
 
-  function handleOrientation(event, sourceName) {
-    const nowPerf = performance.now();
-    state.screenAngle = getScreenAngle();
+    const R = rotationMatrixFromDeviceOrientation(
+      sample.alpha_deg,
+      sample.beta_deg,
+      sample.gamma_deg,
+      sample.screenAngle_deg
+    );
 
-    const webkitHeading = finite(event.webkitCompassHeading) ? event.webkitCompassHeading : NaN;
-    const webkitAccuracy = finite(event.webkitCompassAccuracy) ? event.webkitCompassAccuracy : NaN;
+    if (!R) {
+      return {
+        x: NaN, y: NaN, z: NaN,
+        azimuth_deg: NaN,
+        elevation_deg: NaN
+      };
+    }
 
-    state.latest = {
-      unix_ms: Date.now(),
-      perf_ms: nowPerf,
-      source: sourceName,
-      alpha_deg: finite(event.alpha) ? event.alpha : NaN,
-      beta_deg: finite(event.beta) ? event.beta : NaN,
-      gamma_deg: finite(event.gamma) ? event.gamma : NaN,
-      absolute: event.absolute === true,
-      webkitCompassHeading_deg: webkitHeading,
-      webkitCompassAccuracy_deg: webkitAccuracy,
-      screenAngle_deg: state.screenAngle
+    const u = normalize3(matVecMul3(R, vDevice));
+
+    const az = wrap360(rad2deg(Math.atan2(u[1], u[0])));
+    const elv = rad2deg(Math.atan2(u[2], Math.hypot(u[0], u[1])));
+
+    return {
+      x: u[0],
+      y: u[1],
+      z: u[2],
+      azimuth_deg: az,
+      elevation_deg: elv
     };
-
-    updateReadout();
-
-    if (state.logging) {
-      const samplePeriod = Math.max(5, Number(ids.samplePeriodMs.value) || 20);
-      if (nowPerf - state.lastSamplePerfMs >= samplePeriod) {
-        addRow("");
-        state.lastSamplePerfMs = nowPerf;
-      }
-    }
   }
 
-  function computeDeltas() {
+  function computeLineOfSightDeltas() {
     const L = state.latest;
     const C = state.calibration;
+
+    if (!L || !C || !L.los || !C.los) {
+      return {
+        los_az_delta_deg: NaN,
+        los_el_delta_deg: NaN
+      };
+    }
+
+    return {
+      los_az_delta_deg: wrap180(L.los.azimuth_deg - C.los.azimuth_deg),
+      los_el_delta_deg: L.los.elevation_deg - C.los.elevation_deg
+    };
+  }
+
+  function computeRawDeltas() {
+    const L = state.latest;
+    const C = state.calibration;
+
     if (!L || !C) {
       return {
         alpha_delta_deg: NaN,
@@ -395,27 +483,89 @@
     };
   }
 
+  async function enableSensors() {
+    try {
+      if (!window.isSecureContext) {
+        setStatus("ERROR: not HTTPS. Host this page with GitHub Pages and open the github.io link.", "bad");
+        return;
+      }
+
+      if (typeof DeviceOrientationEvent === "undefined") {
+        setStatus("ERROR: DeviceOrientationEvent is not supported on this browser.", "bad");
+        return;
+      }
+
+      if (typeof DeviceOrientationEvent.requestPermission === "function") {
+        const response = await DeviceOrientationEvent.requestPermission();
+        if (response !== "granted") {
+          setStatus("Permission denied. Open directly in Safari/Chrome over HTTPS, or reset site permissions.", "bad");
+          return;
+        }
+      }
+
+      window.addEventListener("deviceorientation", onOrientation, true);
+      window.addEventListener("deviceorientationabsolute", onOrientationAbsolute, true);
+
+      state.sensorEnabled = true;
+      ids.calibrateBtn.disabled = false;
+      setStatus("Sensors enabled. Move/tilt the tracker and check LOS readings.", "ok");
+    } catch (err) {
+      setStatus("Sensor permission error: " + err, "bad");
+    }
+  }
+
+  function onOrientationAbsolute(event) {
+    handleOrientation(event, "deviceorientationabsolute");
+  }
+
+  function onOrientation(event) {
+    handleOrientation(event, "deviceorientation");
+  }
+
+  function handleOrientation(event, sourceName) {
+    const nowPerf = performance.now();
+    const screenAngle = getScreenAngle();
+
+    const webkitHeading = finite(event.webkitCompassHeading) ? event.webkitCompassHeading : NaN;
+    const webkitAccuracy = finite(event.webkitCompassAccuracy) ? event.webkitCompassAccuracy : NaN;
+
+    const sample = {
+      unix_ms: Date.now(),
+      perf_ms: nowPerf,
+      source: sourceName,
+      alpha_deg: finite(event.alpha) ? event.alpha : NaN,
+      beta_deg: finite(event.beta) ? event.beta : NaN,
+      gamma_deg: finite(event.gamma) ? event.gamma : NaN,
+      absolute: event.absolute === true,
+      webkitCompassHeading_deg: webkitHeading,
+      webkitCompassAccuracy_deg: webkitAccuracy,
+      screenAngle_deg: screenAngle
+    };
+
+    sample.los = computeLineOfSight(sample);
+    state.latest = sample;
+
+    updateReadout();
+
+    if (state.logging) {
+      const samplePeriod = Math.max(5, Number(ids.samplePeriodMs.value) || 20);
+      if (nowPerf - state.lastSamplePerfMs >= samplePeriod) {
+        addRow("");
+        state.lastSamplePerfMs = nowPerf;
+      }
+    }
+  }
+
   function calibrate() {
     if (!state.latest) {
       alert("No sensor data yet. Press Enable Sensors first.");
       return;
     }
 
-    state.calibration = {
-      unix_ms: state.latest.unix_ms,
-      perf_ms: state.latest.perf_ms,
-      alpha_deg: state.latest.alpha_deg,
-      beta_deg: state.latest.beta_deg,
-      gamma_deg: state.latest.gamma_deg,
-      absolute: state.latest.absolute,
-      webkitCompassHeading_deg: state.latest.webkitCompassHeading_deg,
-      webkitCompassAccuracy_deg: state.latest.webkitCompassAccuracy_deg,
-      screenAngle_deg: state.latest.screenAngle_deg,
-      source: state.latest.source
-    };
+    state.calibration = JSON.parse(JSON.stringify(state.latest));
 
     ids.startBtn.disabled = false;
-    setStatus("Calibrated. Now press Start Logging before launch.", "ok");
+    setStatus("Calibrated. MATLAB should treat this as the launch-pad direction.", "ok");
     updateReadout();
   }
 
@@ -437,22 +587,26 @@
     state.logging = true;
 
     const obs = getObserverInfo();
+
     const metadata = {
       file_type: "rocket_angle_tracker_csv",
-      version: "1.0",
+      version: "2.0_line_of_sight_vector",
       created_unix_ms: Date.now(),
       observer_id: obs.observer_id,
       x_obs_m: obs.x_obs_m,
       y_obs_m: obs.y_obs_m,
       z_obs_m: obs.z_obs_m,
-      phone_mode: obs.phone_mode,
+      barrel_axis: obs.barrel_axis,
       calibration_unix_ms: state.calibration.unix_ms,
       calibration_alpha_deg: state.calibration.alpha_deg,
       calibration_beta_deg: state.calibration.beta_deg,
       calibration_gamma_deg: state.calibration.gamma_deg,
-      calibration_webkitCompassHeading_deg: state.calibration.webkitCompassHeading_deg,
-      calibration_webkitCompassAccuracy_deg: state.calibration.webkitCompassAccuracy_deg,
-      note: "Rows beginning with # are metadata. Data columns follow the header row."
+      calibration_los_x: state.calibration.los.x,
+      calibration_los_y: state.calibration.los.y,
+      calibration_los_z: state.calibration.los.z,
+      calibration_los_azimuth_deg: state.calibration.los.azimuth_deg,
+      calibration_los_elevation_deg: state.calibration.los.elevation_deg,
+      note: "Use LOS columns for triangulation. Raw alpha/beta/gamma are included for debugging only."
     };
 
     Object.entries(metadata).forEach(([k, v]) => {
@@ -464,7 +618,7 @@
       "x_obs_m",
       "y_obs_m",
       "z_obs_m",
-      "phone_mode",
+      "barrel_axis",
       "unix_ms",
       "t_s",
       "perf_ms",
@@ -476,6 +630,13 @@
       "beta_delta_deg",
       "gamma_delta_deg",
       "compass_delta_deg",
+      "los_x",
+      "los_y",
+      "los_z",
+      "los_azimuth_deg",
+      "los_elevation_deg",
+      "los_az_delta_deg",
+      "los_el_delta_deg",
       "absolute",
       "webkitCompassHeading_deg",
       "webkitCompassAccuracy_deg",
@@ -490,7 +651,7 @@
     ids.startBtn.disabled = true;
     ids.calibrateBtn.disabled = true;
 
-    setStatus("Logging orientation data.", "ok");
+    setStatus("Logging line-of-sight data.", "ok");
     updateCount();
   }
 
@@ -499,7 +660,7 @@
     ids.markLaunchBtn.disabled = true;
     ids.markApogeeBtn.disabled = true;
     ids.stopBtn.disabled = true;
-    ids.downloadBtn.disabled = state.rows.length <= 1;
+    ids.downloadBtn.disabled = state.rows.length <= 2;
     ids.startBtn.disabled = false;
     ids.calibrateBtn.disabled = false;
     setStatus("Stopped. Download CSV.", "warn");
@@ -520,7 +681,8 @@
 
     const obs = getObserverInfo();
     const L = state.latest;
-    const D = computeDeltas();
+    const rawD = computeRawDeltas();
+    const losD = computeLineOfSightDeltas();
     const t_s = currentElapsedTime();
 
     const row = [
@@ -528,7 +690,7 @@
       fmt(obs.x_obs_m, 3),
       fmt(obs.y_obs_m, 3),
       fmt(obs.z_obs_m, 3),
-      csvEscape(obs.phone_mode),
+      csvEscape(obs.barrel_axis),
       L.unix_ms,
       fmt(t_s, 6),
       fmt(L.perf_ms, 3),
@@ -536,10 +698,17 @@
       fmt(L.alpha_deg, 6),
       fmt(L.beta_deg, 6),
       fmt(L.gamma_deg, 6),
-      fmt(D.alpha_delta_deg, 6),
-      fmt(D.beta_delta_deg, 6),
-      fmt(D.gamma_delta_deg, 6),
-      fmt(D.compass_delta_deg, 6),
+      fmt(rawD.alpha_delta_deg, 6),
+      fmt(rawD.beta_delta_deg, 6),
+      fmt(rawD.gamma_delta_deg, 6),
+      fmt(rawD.compass_delta_deg, 6),
+      fmt(L.los.x, 8),
+      fmt(L.los.y, 8),
+      fmt(L.los.z, 8),
+      fmt(L.los.azimuth_deg, 6),
+      fmt(L.los.elevation_deg, 6),
+      fmt(losD.los_az_delta_deg, 6),
+      fmt(losD.los_el_delta_deg, 6),
       L.absolute ? "true" : "false",
       fmt(L.webkitCompassHeading_deg, 6),
       fmt(L.webkitCompassAccuracy_deg, 6),
@@ -592,6 +761,7 @@
       alert("Stop logging before clearing data.");
       return;
     }
+
     state.rows = [];
     state.markers = [];
     state.sampleCount = 0;
@@ -610,20 +780,38 @@
       return;
     }
 
-    const D = computeDeltas();
+    const rawD = computeRawDeltas();
+    const losD = computeLineOfSightDeltas();
     const C = state.calibration;
 
     ids.readout.textContent =
       `unix_ms: ${L.unix_ms}\n` +
       `source: ${L.source}\n` +
-      `secure_context: ${window.isSecureContext}\n\n` +
+      `secure_context: ${window.isSecureContext}\n` +
+      `barrel_axis: ${ids.barrelAxis.value}\n\n` +
+
+      `RAW EULER ANGLES, DEBUG ONLY\n` +
       `alpha_deg: ${fmt(L.alpha_deg, 3)}\n` +
       `beta_deg:  ${fmt(L.beta_deg, 3)}\n` +
       `gamma_deg: ${fmt(L.gamma_deg, 3)}\n\n` +
-      `alpha_delta_deg:   ${fmt(D.alpha_delta_deg, 3)}\n` +
-      `beta_delta_deg:    ${fmt(D.beta_delta_deg, 3)}\n` +
-      `gamma_delta_deg:   ${fmt(D.gamma_delta_deg, 3)}\n` +
-      `compass_delta_deg: ${fmt(D.compass_delta_deg, 3)}\n\n` +
+
+      `RAW DELTAS, DEBUG ONLY\n` +
+      `alpha_delta_deg:   ${fmt(rawD.alpha_delta_deg, 3)}\n` +
+      `beta_delta_deg:    ${fmt(rawD.beta_delta_deg, 3)}\n` +
+      `gamma_delta_deg:   ${fmt(rawD.gamma_delta_deg, 3)}\n` +
+      `compass_delta_deg: ${fmt(rawD.compass_delta_deg, 3)}\n\n` +
+
+      `COMPUTED LINE OF SIGHT, USE THESE\n` +
+      `los_x: ${fmt(L.los.x, 5)}\n` +
+      `los_y: ${fmt(L.los.y, 5)}\n` +
+      `los_z: ${fmt(L.los.z, 5)}\n` +
+      `los_azimuth_deg:   ${fmt(L.los.azimuth_deg, 3)}\n` +
+      `los_elevation_deg: ${fmt(L.los.elevation_deg, 3)}\n\n` +
+
+      `LOS DELTAS FROM CALIBRATION\n` +
+      `los_az_delta_deg: ${fmt(losD.los_az_delta_deg, 3)}\n` +
+      `los_el_delta_deg: ${fmt(losD.los_el_delta_deg, 3)}\n\n` +
+
       `absolute: ${L.absolute}\n` +
       `webkitCompassHeading_deg: ${fmt(L.webkitCompassHeading_deg, 3)}\n` +
       `webkitCompassAccuracy_deg: ${fmt(L.webkitCompassAccuracy_deg, 3)}\n` +
