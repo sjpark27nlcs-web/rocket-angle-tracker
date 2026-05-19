@@ -7,15 +7,17 @@
   <style>
     :root {
       color-scheme: dark;
-      --bg: #0f1115;
-      --card: #1a1d25;
-      --card2: #232735;
-      --text: #f2f4f8;
-      --muted: #aab2c0;
+      --bg: #111318;
+      --card: #191d24;
+      --card2: #222834;
+      --text: #f6f7fb;
+      --muted: #aeb7c6;
       --accent: #6ee7b7;
+      --accent2: #60a5fa;
       --warn: #fbbf24;
       --danger: #fb7185;
       --border: #343a49;
+      --ink: #0b0d12;
     }
 
     * { box-sizing: border-box; }
@@ -25,23 +27,32 @@
       padding: 16px;
       padding-bottom: 40px;
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: var(--bg);
+      background: linear-gradient(180deg, #151922 0%, var(--bg) 220px);
       color: var(--text);
       line-height: 1.35;
     }
 
     h1, h2, h3 { margin: 0 0 10px; }
     h1 { font-size: 1.6rem; }
-    h2 { font-size: 1.15rem; color: var(--accent); }
+    h2 { font-size: 1.05rem; color: var(--accent); letter-spacing: 0; }
     p { color: var(--muted); margin: 8px 0; }
+
+    .app {
+      width: min(980px, 100%);
+      margin: 0 auto;
+    }
+
+    .topbar {
+      margin: 4px 0 18px;
+    }
 
     .card {
       background: var(--card);
       border: 1px solid var(--border);
-      border-radius: 14px;
-      padding: 14px;
+      border-radius: 8px;
+      padding: 16px;
       margin: 12px 0;
-      box-shadow: 0 6px 18px rgba(0,0,0,0.25);
+      box-shadow: 0 8px 22px rgba(0,0,0,0.22);
     }
 
     .grid2 {
@@ -66,7 +77,7 @@
     input, select, button {
       width: 100%;
       font: inherit;
-      border-radius: 10px;
+      border-radius: 8px;
       border: 1px solid var(--border);
       padding: 11px;
       background: var(--card2);
@@ -79,17 +90,20 @@
       margin: 5px 0;
       border: 0;
       background: #2f3648;
+      transition: filter 120ms ease, transform 120ms ease;
     }
 
     button.primary { background: #047857; }
     button.warning { background: #92400e; }
     button.danger { background: #9f1239; }
     button.blue { background: #1d4ed8; }
+    button:hover:not(:disabled) { filter: brightness(1.08); }
+    button:active:not(:disabled) { transform: translateY(1px); }
     button:disabled { opacity: 0.45; cursor: not-allowed; }
 
     .status {
       padding: 10px;
-      border-radius: 10px;
+      border-radius: 8px;
       background: var(--card2);
       border: 1px solid var(--border);
       font-weight: 700;
@@ -108,27 +122,97 @@
     .readout {
       white-space: pre-wrap;
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      background: #0b0d12;
+      background: var(--ink);
       border: 1px solid var(--border);
-      border-radius: 10px;
+      border-radius: 8px;
       padding: 12px;
       overflow-x: auto;
     }
 
     .tiny { font-size: 0.82rem; color: var(--muted); }
     .marker-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 28px;
+      padding: 4px 9px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      color: var(--muted);
+      background: rgba(255,255,255,0.03);
+      font-size: 0.82rem;
+      font-weight: 700;
+    }
+
+    .pill-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 10px 0 0;
+    }
+
+    .visual-wrap {
+      background: var(--ink);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: min(56vw, 430px);
+      min-height: 280px;
+    }
+
+    .legend {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      padding: 10px;
+      border-top: 1px solid var(--border);
+      background: rgba(255,255,255,0.03);
+    }
+
+    .legend span {
+      color: var(--muted);
+      font-size: 0.82rem;
+    }
+
+    .key {
+      display: inline-block;
+      width: 18px;
+      height: 3px;
+      margin-right: 6px;
+      vertical-align: middle;
+      border-radius: 2px;
+    }
+
+    .green { background: #10b981; }
+    .red { background: #ef4444; }
+    .dash { background: repeating-linear-gradient(90deg, #fca5a5 0 5px, transparent 5px 9px); }
 
     @media (max-width: 520px) {
       .grid2, .grid3, .marker-row { grid-template-columns: 1fr; }
+      .legend { grid-template-columns: 1fr; }
     }
   </style>
 </head>
 
 <body>
-  <h1>Rocket Angle Tracker</h1>
-  <p>
-    Logs phone orientation data for rocket triangulation. This version computes a 3D line-of-sight vector instead of directly using raw alpha/beta as azimuth/elevation.
-  </p>
+  <main class="app">
+  <div class="topbar">
+    <h1>Rocket Angle Tracker</h1>
+    <p>
+      Logs phone orientation data for two-phone rocket triangulation. The primary line-of-sight calculation uses fixed gamma to reduce high-elevation Euler-angle discontinuities.
+    </p>
+    <div class="pill-row">
+      <span class="pill">gamma_fixed_deg = -90</span>
+      <span class="pill">raw alpha/beta/gamma are debug only</span>
+      <span class="pill">single-file HTML</span>
+    </div>
+  </div>
 
   <div class="card">
     <h2>1. Observer setup</h2>
@@ -203,7 +287,22 @@
   </div>
 
   <div class="card">
-    <h2>5. Instructions</h2>
+    <h2>5. Visual debug diagram</h2>
+    <div class="visual-wrap">
+      <canvas id="debugCanvas" width="900" height="520" aria-label="Live line-of-sight debug diagram"></canvas>
+      <div class="legend">
+        <span><i class="key green"></i>Calibration reference</span>
+        <span><i class="key red"></i>Current fixed-gamma LOS</span>
+        <span><i class="key dash"></i>Ground projection</span>
+      </div>
+    </div>
+    <p class="tiny">
+      The green reference stays fixed after calibration. The red vector and dashed projection update live using gamma_fixed_deg = -90.
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>6. Instructions</h2>
     <ol class="muted">
       <li>Open this page directly in Safari/Chrome over HTTPS.</li>
       <li>Select the correct barrel-axis mode.</li>
@@ -217,10 +316,13 @@
       Use los_azimuth_deg / los_elevation_deg or los_az_delta_deg / los_el_delta_deg for MATLAB processing, not raw alpha/beta.
     </p>
   </div>
+  </main>
 
 <script>
 (() => {
   "use strict";
+
+  const GAMMA_FIXED_DEG = -90;
 
   const state = {
     latest: null,
@@ -255,7 +357,8 @@
     statusBox: el("statusBox"),
     sampleCount: el("sampleCount"),
     markerList: el("markerList"),
-    readout: el("readout")
+    readout: el("readout"),
+    debugCanvas: el("debugCanvas")
   };
 
   function setStatus(message, kind = "warn") {
@@ -412,11 +515,12 @@
   function computeLineOfSight(sample) {
     const axisMode = ids.barrelAxis.value;
     const vDevice = barrelVectorDevice(axisMode);
+    const gammaForLOS = GAMMA_FIXED_DEG;
 
     const R = rotationMatrixFromDeviceOrientation(
       sample.alpha_deg,
       sample.beta_deg,
-      sample.gamma_deg,
+      gammaForLOS,
       sample.screenAngle_deg
     );
 
@@ -438,7 +542,8 @@
       y: u[1],
       z: u[2],
       azimuth_deg: az,
-      elevation_deg: elv
+      elevation_deg: elv,
+      gamma_fixed_deg: gammaForLOS
     };
   }
 
@@ -536,6 +641,7 @@
       alpha_deg: finite(event.alpha) ? event.alpha : NaN,
       beta_deg: finite(event.beta) ? event.beta : NaN,
       gamma_deg: finite(event.gamma) ? event.gamma : NaN,
+      gamma_fixed_deg: GAMMA_FIXED_DEG,
       absolute: event.absolute === true,
       webkitCompassHeading_deg: webkitHeading,
       webkitCompassAccuracy_deg: webkitAccuracy,
@@ -546,6 +652,7 @@
     state.latest = sample;
 
     updateReadout();
+    drawDebugDiagram();
 
     if (state.logging) {
       const samplePeriod = Math.max(5, Number(ids.samplePeriodMs.value) || 20);
@@ -567,6 +674,7 @@
     ids.startBtn.disabled = false;
     setStatus("Calibrated. MATLAB should treat this as the launch-pad direction.", "ok");
     updateReadout();
+    drawDebugDiagram();
   }
 
   function startLogging() {
@@ -597,16 +705,20 @@
       y_obs_m: obs.y_obs_m,
       z_obs_m: obs.z_obs_m,
       barrel_axis: obs.barrel_axis,
+      gamma_fixed_mode: "fixed",
+      gamma_fixed_deg: GAMMA_FIXED_DEG,
+      phone_mount_description: "phone long axis parallel to tracker/barrel axis",
       calibration_unix_ms: state.calibration.unix_ms,
       calibration_alpha_deg: state.calibration.alpha_deg,
       calibration_beta_deg: state.calibration.beta_deg,
       calibration_gamma_deg: state.calibration.gamma_deg,
+      calibration_gamma_fixed_deg: GAMMA_FIXED_DEG,
       calibration_los_x: state.calibration.los.x,
       calibration_los_y: state.calibration.los.y,
       calibration_los_z: state.calibration.los.z,
       calibration_los_azimuth_deg: state.calibration.los.azimuth_deg,
       calibration_los_elevation_deg: state.calibration.los.elevation_deg,
-      note: "Use LOS columns for triangulation. Raw alpha/beta/gamma are included for debugging only."
+      note: "Use LOS columns for triangulation. Raw alpha/beta/gamma are included for debugging only. The main LOS calculation uses fixed gamma to reduce Euler-angle discontinuity near high-elevation tracking."
     };
 
     Object.entries(metadata).forEach(([k, v]) => {
@@ -630,6 +742,7 @@
       "beta_delta_deg",
       "gamma_delta_deg",
       "compass_delta_deg",
+      "gamma_fixed_deg",
       "los_x",
       "los_y",
       "los_z",
@@ -702,6 +815,7 @@
       fmt(rawD.beta_delta_deg, 6),
       fmt(rawD.gamma_delta_deg, 6),
       fmt(rawD.compass_delta_deg, 6),
+      fmt(GAMMA_FIXED_DEG, 6),
       fmt(L.los.x, 8),
       fmt(L.los.y, 8),
       fmt(L.los.z, 8),
@@ -771,6 +885,200 @@
     ids.downloadBtn.disabled = true;
     updateCount();
     setStatus("Data cleared.", "warn");
+    drawDebugDiagram();
+  }
+
+  function resizeCanvasToDisplaySize(canvas) {
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    const width = Math.max(1, Math.round(rect.width * dpr));
+    const height = Math.max(1, Math.round(rect.height * dpr));
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
+    }
+    return { width: rect.width, height: rect.height, dpr };
+  }
+
+  function validVector(v) {
+    return Array.isArray(v) && v.length === 3 && v.every(finite);
+  }
+
+  function losToVector(los, flatten = false) {
+    if (!los) return [NaN, NaN, NaN];
+    const v = [los.x, los.y, flatten ? 0 : los.z];
+    return normalize3(v);
+  }
+
+  function signedHorizontalAngleDeg(fromVec, toVec) {
+    if (!validVector(fromVec) || !validVector(toVec)) return NaN;
+    const crossZ = fromVec[0] * toVec[1] - fromVec[1] * toVec[0];
+    const dot = fromVec[0] * toVec[0] + fromVec[1] * toVec[1];
+    return rad2deg(Math.atan2(crossZ, dot));
+  }
+
+  function drawDebugDiagram() {
+    const canvas = ids.debugCanvas;
+    if (!canvas) return;
+
+    const { width, height, dpr } = resizeCanvasToDisplaySize(canvas);
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+
+    const origin = { x: width * 0.50, y: height * 0.74 };
+    const scale = Math.min(width, height) * 0.32;
+
+    function project(v) {
+      return {
+        x: origin.x + scale * (0.82 * v[0] - 0.82 * v[1]),
+        y: origin.y + scale * (0.34 * v[0] + 0.34 * v[1] - 0.98 * v[2])
+      };
+    }
+
+    function line3(a, b, color, widthPx = 2, dash = []) {
+      const p = project(a);
+      const q = project(b);
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = widthPx;
+      ctx.setLineDash(dash);
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+      ctx.lineTo(q.x, q.y);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function arrow3(a, b, color, widthPx = 3) {
+      const p = project(a);
+      const q = project(b);
+      const angle = Math.atan2(q.y - p.y, q.x - p.x);
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.fillStyle = color;
+      ctx.lineWidth = widthPx;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+      ctx.lineTo(q.x, q.y);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(q.x, q.y);
+      ctx.lineTo(q.x - 13 * Math.cos(angle - 0.42), q.y - 13 * Math.sin(angle - 0.42));
+      ctx.lineTo(q.x - 13 * Math.cos(angle + 0.42), q.y - 13 * Math.sin(angle + 0.42));
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+
+    function dot3(v, color, radius = 5) {
+      const p = project(v);
+      ctx.save();
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    function label(text, x, y, color = "#aeb7c6") {
+      ctx.save();
+      ctx.fillStyle = color;
+      ctx.font = "13px ui-monospace, SFMono-Regular, Menlo, monospace";
+      ctx.fillText(text, x, y);
+      ctx.restore();
+    }
+
+    function drawArc(points, color, widthPx = 2) {
+      if (points.length < 2) return;
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = widthPx;
+      ctx.beginPath();
+      points.forEach((v, i) => {
+        const p = project(v);
+        if (i === 0) ctx.moveTo(p.x, p.y);
+        else ctx.lineTo(p.x, p.y);
+      });
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    ctx.fillStyle = "#0b0d12";
+    ctx.fillRect(0, 0, width, height);
+
+    for (let i = -4; i <= 4; i++) {
+      const t = i / 4;
+      line3([-1, t, 0], [1, t, 0], "rgba(148,163,184,0.18)", 1);
+      line3([t, -1, 0], [t, 1, 0], "rgba(148,163,184,0.18)", 1);
+    }
+
+    line3([-1.05, 0, 0], [1.05, 0, 0], "rgba(148,163,184,0.45)", 1.5);
+    line3([0, -1.05, 0], [0, 1.05, 0], "rgba(148,163,184,0.45)", 1.5);
+    line3([0, 0, 0], [0, 0, 1.0], "rgba(148,163,184,0.35)", 1.5);
+
+    label("+x", project([1.05, 0, 0]).x + 4, project([1.05, 0, 0]).y, "#94a3b8");
+    label("+y", project([0, 1.05, 0]).x - 22, project([0, 1.05, 0]).y, "#94a3b8");
+    label("up", project([0, 0, 1]).x + 6, project([0, 0, 1]).y, "#94a3b8");
+
+    const zero = [0, 0, 0];
+    const current = losToVector(state.latest && state.latest.los);
+    const currentGround = losToVector(state.latest && state.latest.los, true);
+    const calibration = losToVector(state.calibration && state.calibration.los);
+    const calibrationGround = losToVector(state.calibration && state.calibration.los, true);
+
+    if (validVector(calibration)) {
+      arrow3(zero, calibration, "#10b981", 3);
+      dot3(calibration, "#10b981", 6);
+      line3(zero, calibrationGround, "rgba(16,185,129,0.55)", 2);
+    } else {
+      label("Calibrate to lock the green launch-pad reference.", 18, 28, "#fbbf24");
+    }
+
+    if (validVector(current)) {
+      line3(zero, currentGround, "rgba(248,113,113,0.85)", 2.5, [8, 7]);
+      arrow3(zero, current, "#ef4444", 3.5);
+
+      const hNorm = Math.hypot(current[0], current[1]);
+      const elDeg = finite(hNorm) ? rad2deg(Math.atan2(current[2], hNorm)) : NaN;
+      const horizDir = validVector(currentGround) ? currentGround : [1, 0, 0];
+
+      const elevationPoints = [];
+      const elevationRad = deg2rad(elDeg || 0);
+      const elevationSteps = 24;
+      for (let i = 0; i <= elevationSteps; i++) {
+        const t = i / elevationSteps;
+        const a = elevationRad * t;
+        elevationPoints.push([
+          0.30 * Math.cos(a) * horizDir[0],
+          0.30 * Math.cos(a) * horizDir[1],
+          0.30 * Math.sin(a)
+        ]);
+      }
+      drawArc(elevationPoints, "#60a5fa", 2.5);
+
+      if (validVector(calibrationGround) && validVector(currentGround)) {
+        const azDeg = signedHorizontalAngleDeg(calibrationGround, currentGround);
+        const start = Math.atan2(calibrationGround[1], calibrationGround[0]);
+        const sweep = deg2rad(azDeg);
+        const azPoints = [];
+        const steps = Math.max(8, Math.ceil(Math.abs(azDeg) / 4));
+        for (let i = 0; i <= steps; i++) {
+          const a = start + sweep * (i / steps);
+          azPoints.push([0.23 * Math.cos(a), 0.23 * Math.sin(a), 0]);
+        }
+        drawArc(azPoints, "#fbbf24", 2.5);
+        label(`az delta ${fmt(azDeg, 1)} deg`, 16, height - 42, "#fbbf24");
+      }
+
+      label(`elevation ${fmt(elDeg, 1)} deg`, 16, height - 20, "#60a5fa");
+    } else {
+      label("Enable sensors to draw the red live LOS vector.", 18, 50, "#aeb7c6");
+    }
+
+    dot3(zero, "#f8fafc", 5);
+    label("observer", origin.x + 8, origin.y - 8, "#f8fafc");
   }
 
   function updateReadout() {
@@ -802,6 +1110,8 @@
       `compass_delta_deg: ${fmt(rawD.compass_delta_deg, 3)}\n\n` +
 
       `COMPUTED LINE OF SIGHT, USE THESE\n` +
+      `gamma_fixed_deg: ${fmt(GAMMA_FIXED_DEG, 3)}\n` +
+      `note: LOS values use fixed gamma, not raw gamma\n` +
       `los_x: ${fmt(L.los.x, 5)}\n` +
       `los_y: ${fmt(L.los.y, 5)}\n` +
       `los_z: ${fmt(L.los.z, 5)}\n` +
@@ -828,10 +1138,18 @@
   ids.stopBtn.addEventListener("click", stopLogging);
   ids.downloadBtn.addEventListener("click", downloadCSV);
   ids.clearBtn.addEventListener("click", clearData);
+  ids.barrelAxis.addEventListener("change", () => {
+    if (state.latest) state.latest.los = computeLineOfSight(state.latest);
+    updateReadout();
+    drawDebugDiagram();
+  });
+  window.addEventListener("resize", drawDebugDiagram);
 
   if (!window.isSecureContext) {
     setStatus("Warning: not HTTPS. Sensor permission will probably fail.", "bad");
   }
+
+  drawDebugDiagram();
 })();
 </script>
 </body>
