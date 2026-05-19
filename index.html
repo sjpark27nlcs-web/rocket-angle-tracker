@@ -928,11 +928,15 @@
 
     const origin = { x: width * 0.50, y: height * 0.74 };
     const scale = Math.min(width, height) * 0.32;
+    const viewReference = losToVector(state.calibration && state.calibration.los, true);
+    const viewForward = validVector(viewReference) ? viewReference : [0, 1, 0];
 
     function project(v) {
+      const right = viewForward[1] * v[0] - viewForward[0] * v[1];
+      const forward = viewForward[0] * v[0] + viewForward[1] * v[1];
       return {
-        x: origin.x + scale * (0.82 * v[0] - 0.82 * v[1]),
-        y: origin.y + scale * (0.34 * v[0] + 0.34 * v[1] - 0.98 * v[2])
+        x: origin.x + scale * 0.88 * right,
+        y: origin.y - scale * (0.58 * forward + 0.98 * v[2])
       };
     }
 
@@ -1032,6 +1036,7 @@
       arrow3(zero, calibration, "#10b981", 3);
       dot3(calibration, "#10b981", 6);
       line3(zero, calibrationGround, "rgba(16,185,129,0.55)", 2);
+      label("view yaw locked to calibration", 18, 28, "#10b981");
     } else {
       label("Calibrate to lock the green launch-pad reference.", 18, 28, "#fbbf24");
     }
